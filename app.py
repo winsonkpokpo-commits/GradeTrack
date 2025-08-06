@@ -1,5 +1,6 @@
 # app.py
 # Application Streamlit pour le suivi des notes et moyennes des élèves ("GradeTrack")
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,6 +12,7 @@ st.set_page_config(page_title="GradeTrack", layout="wide")
 
 CSV_PATH = "notes.csv"
 
+# Chargement des données
 def charger_donnees():
     if os.path.exists(CSV_PATH):
         try:
@@ -19,12 +21,15 @@ def charger_donnees():
             st.warning("Erreur lors du chargement des données. Le fichier CSV est peut-être corrompu.")
     return []
 
+# Sauvegarde
 def sauvegarder_donnees():
     pd.DataFrame(st.session_state.data).to_csv(CSV_PATH, index=False)
 
+# Initialisation
 if 'data' not in st.session_state:
     st.session_state.data = charger_donnees()
 
+# Ajouter une note
 def ajouter_note(eleve, matiere, note, coef, trimestre):
     st.session_state.data.append({
         'id': str(uuid.uuid4()),
@@ -36,12 +41,14 @@ def ajouter_note(eleve, matiere, note, coef, trimestre):
     })
     sauvegarder_donnees()
 
+# Supprimer une note
 def supprimer_note(note_id):
     st.session_state.data = [n for n in st.session_state.data if n.get('id') != note_id]
     sauvegarder_donnees()
     st.toast("Note supprimée avec succès", icon="🗑️")
     st.experimental_rerun()
 
+# Moyenne pondérée
 def calcul_moyenne(df):
     if df.empty:
         return None
@@ -49,15 +56,17 @@ def calcul_moyenne(df):
     total_coef = df['Coefficient'].sum()
     return weighted_sum / total_coef if total_coef != 0 else None
 
+# Couleur selon moyenne
 def couleur_moyenne(moy):
     if moy is None:
         return "gray"
     return "green" if moy >= 16 else "orange" if moy >= 12 else "red"
 
+# Titre
 st.title("📊 GradeTrack - Suivi des notes et moyennes")
 
-# Sidebar : choix élève
-eleves = sorted(set(d['Eleve'] for d in st.session_state.data))
+# Sélection élève
+eleves = sorted(set(d['Eleve'] for d in st.session_state.data if d.get('Eleve')))
 eleve_choisi = st.sidebar.selectbox("🎓 Choisir un élève", options=eleves + ["-- Nouvel élève --"])
 
 if eleve_choisi == "-- Nouvel élève --":
@@ -71,14 +80,14 @@ if eleve_choisi == "-- Nouvel élève --":
         else:
             st.sidebar.warning("Cet élève existe déjà.")
 
-# Réinitialisation (admin)
+# Réinitialisation des données
 if st.sidebar.button("🔁 Réinitialiser toutes les données"):
     st.session_state.data = []
     sauvegarder_donnees()
     st.sidebar.success("Toutes les données ont été supprimées.")
     st.experimental_rerun()
 
-# Formulaire ajout de note
+# Formulaire pour ajouter une note
 with st.form(f"form_{eleve_choisi}"):
     st.markdown(f"### Ajouter une note pour {eleve_choisi}")
     matiere = st.text_input("Matière")
@@ -89,10 +98,21 @@ with st.form(f"form_{eleve_choisi}"):
 
     if submit:
         if eleve_choisi in [None, "", "-- Nouvel élève --"]:
-)
+            st.warning("Veuillez sélectionner un élève valide.")
+        elif not matiere:
+            st.warning("Veuillez entrer une matière.")
+        else:
+            ajouter_note(eleve_choisi, matiere, note, coef, trimestre)
+            st.success("Note ajoutée avec succès.")
+            st.experimental_rerun()
+
+# Création du DataFrame
+df = pd.DataFrame(st.session_state.data)
 if not df.empty:
     df['Note'] = pd.to_numeric(df['Note'], errors='coerce')
     df['Coefficient'] = pd.to_numeric(df['Coefficient'], errors='coerce')
+    df.dropna(subset=['Note', 'Coefficient'], inplace=True)
+
 df_eleve = df[df['Eleve'] == eleve_choisi] if eleve_choisi in df['Eleve'].values else pd.DataFrame()
 
 # Filtres
