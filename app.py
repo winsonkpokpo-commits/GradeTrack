@@ -1,192 +1,511 @@
-# app.py
-# Application Streamlit pour le suivi des notes et moyennes des élèves ("GradeTrack")
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import io
+import hashlib
 import os
-import uuid
+import json
+from datetime import datetime
 
-st.set_page_config(page_title="GradeTrack", layout="wide")
+# ========== Configuration et constantes ==========
 
-CSV_PATH = "notes.csv"
+# Configuration de la page
+st.set_page_config(
+    page_title="GradeTrack Complet", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-def charger_donnees():
-    if os.path.exists(CSV_PATH):
+# ========== Fonctions utilitaires ==========
+
+def hash_password(password):
+    """Hash un mot de passe avec SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Base utilisateurs simple (à remplacer par vrai stockage sécurisé)
+USERS = {
+    "alice": hash_password("alice123"),
+    "bob": hash_password("bob456"),
+    "demo": hash_password("demo123"),
+}
+
+def check_credentials(username, password):
+    """Vérifie les identifiants utilisateur"""
+    return username in USERS and hash_password(password) == USERS[username]
+
+def get_data_path(username):
+    """Retourne le chemin du fichier de données pour un utilisateur"""
+    return f"data/{username}_notes.csv"
+
+def ensure_data_directory():
+    """S'assure que le dossier data existe"""
+    if not os.path.exists("data"):
+        os.makedirs("data")
+
+def load_user_data(username):
+    """Charge les données d'un utilisateur"""
+    ensure_data_directory()
+    path = get_data_path(username)
+    if os.path.exists(path):
         try:
-            return pd.read_csv(CSV_PATH).to_dict(orient="records")
-        except Exception:
-            st.warning("Erreur lors du chargement des données. Le fichier CSV est peut-être corrompu.")
-    return []
+            df = pd.read_csv(path)
+            # Validation des colonnes
+            required_columns = ["Matière", "Note", "Coefficient", "Trimestre"]
+            if not all(col in df.columns for col in required_columns):
+                return create_empty_dataframe()
+            return df
+        except Exception as e:
+            st.error(f"Erreur lors du chargement des données: {e}")
+            return create_empty_dataframe()
+    else:
+        return create_empty_dataframe()
 
-def sauvegarder_donnees():
-    pd.DataFrame(st.session_state.data).to_csv(CSV_PATH, index=False)
+def create_empty_dataframe():
+    """Crée un DataFrame vide avec les bonnes colonnes"""
+    return pd.DataFrame(columns=["Matière", "Note", "Coefficient", "Trimestre", "Date"])
 
-if 'data' not in st.session_state:
-    st.session_state.data = charger_donnees()
+def save_user_data(username, df):
+    """Sauvegarde les données d'un utilisateur"""
+    ensure_data_directory()
+    try:
+        df.to_csv(get_data_path(username), index=False)
+        return True
+    except Exception as e:
+        st.error(f"Erreur lors de la sauvegarde: {e}")
+        return False
 
-def ajouter_note(eleve, matiere, note, coef, trimestre):
-    st.session_state.data.append({
-        'id': str(uuid.uuid4()),
-        'Eleve': eleve,
-        'Matiere': matiere,
-        'Note': note,
-        'Coefficient': coef,
-        'Trimestre': trimestre
-    })
-    sauvegarder_donnees()
+def calculer_moyenne(df):
+    """Calcule la moyenne pondérée"""
+    if df.empty or df["Coefficient"].sum() == 0:
+        return None
+    return round((df["Note"] * df["Coefficient"]).sum() / df["Coefficient"].sum(), 2)
 
-def supprimer_note(note_id):
-    st.session_state.data = [n for n in st.session_state.data if n.get('id') != note_id]
-    sauvegarder_donnees()
-    st.toast("Note supprimée avec succès", icon="🗑️")
-    st.experimental_rerun()
-
-def calcul_moyenne(df):
+def calculer_statistiques_detaillees(df):
+    """Calcule des statistiques détaillées"""
     if df.empty:
         return None
-    weighted_sum = (df['Note'] * df['Coefficient']).sum()
-    total_coef = df['Coefficient'].sum()
-    return weighted_sum / total_coef if total_coef != 0 else None
+    
+    stats = {
+        "moyenne": calculer_moyenne(df),
+        "note_min": df["Note"].min(),
+        "note_max": df["Note"].max(),
+        "nombre_notes": len(df),
+        "nombre_matieres": df["Matière"].nunique()
+    }
+    return stats
 
-def couleur_moyenne(moy):
-    if moy is None:
-        return "gray"
-    return "green" if moy >= 16 else "orange" if moy >= 12 else "red"
+def valider_note(note, coef, matiere, trimestre):
+    """Valide les données d'une note"""
+    errors = []
+    if not matiere or matiere.strip() == "":
+        errors.append("La matière ne peut pas être vide")
+    if note < 0 or note > 20:
+        errors.append("La note doit être entre 0 et 20")
+    if coef <= 0:
+        errors.append("Le coefficient doit être positif")
+    if trimestre not in ["1", "2", "3"]:
+        errors.append("Le trimestre doit être 1, 2 ou 3")
+    return errors
 
-st.title("📊 GradeTrack - Suivi des notes et moyennes")
+# ========== Styles CSS ==========
 
-# Sidebar : choix élève
-eleves = sorted(set(d['Eleve'] for d in st.session_state.data))
-eleve_choisi = st.sidebar.selectbox("🎓 Choisir un élève", options=eleves + ["-- Nouvel élève --"])
+def load_custom_css():
+    """Charge des styles CSS personnalisés"""
+    st.markdown("""
+    <style>
+    .metric-container {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #1f77b4;
+        margin: 0.5rem 0;
+    }
+    .success-message {
+        background-color: #d4edda;
+        color: #155724;
+        padding: 0.75rem;
+        border-radius: 0.25rem;
+        border: 1px solid #c3e6cb;
+    }
+    .warning-message {
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 0.75rem;
+        border-radius: 0.25rem;
+        border: 1px solid #ffeaa7;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-if eleve_choisi == "-- Nouvel élève --":
-    nouveau_eleve = st.sidebar.text_input("Nom du nouvel élève")
-    if nouveau_eleve:
-        if nouveau_eleve not in eleves:
-            eleves.append(nouveau_eleve)
-            eleves.sort()
-            eleve_choisi = nouveau_eleve
-            st.experimental_rerun()
+# ========== Interface principale ==========
+
+def main():
+    load_custom_css()
+    
+    # --- Authentification ---
+    if "user" not in st.session_state:
+        show_login_page()
+        return
+    
+    user = st.session_state["user"]
+    
+    # --- Chargement des données de l'utilisateur ---
+    if "data" not in st.session_state or st.session_state.get("last_user") != user:
+        st.session_state["data"] = load_user_data(user)
+        st.session_state["last_user"] = user
+    
+    df = st.session_state["data"]
+    
+    # --- Sidebar navigation ---
+    with st.sidebar:
+        st.title("🎓 GradeTrack")
+        st.write(f"Connecté en tant que: **{user}**")
+        st.markdown("---")
+        
+        menu = st.selectbox(
+            "Navigation", 
+            ["🏠 Accueil", "➕ Ajouter note", "📋 Voir notes", "📈 Statistiques", "📤 Exporter", "🔓 Déconnexion"]
+        )
+        
+        # Statistiques rapides dans la sidebar
+        if not df.empty:
+            st.markdown("### 📊 Aperçu rapide")
+            stats = calculer_statistiques_detaillees(df)
+            if stats:
+                st.metric("Moyenne générale", f"{stats['moyenne']}/20")
+                st.metric("Nombre de notes", stats['nombre_notes'])
+                st.metric("Matières", stats['nombre_matieres'])
+    
+    # --- Contenu principal basé sur le menu ---
+    if menu == "🏠 Accueil":
+        show_home_page(user, df)
+    elif menu == "➕ Ajouter note":
+        show_add_note_page(user, df)
+    elif menu == "📋 Voir notes":
+        show_view_notes_page(user, df)
+    elif menu == "📈 Statistiques":
+        show_statistics_page(df)
+    elif menu == "📤 Exporter":
+        show_export_page(user, df)
+    elif menu == "🔓 Déconnexion":
+        show_logout_page()
+
+def show_login_page():
+    """Page de connexion"""
+    st.title("🔐 Connexion à GradeTrack")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("### Authentification")
+        with st.form("login_form", clear_on_submit=True):
+            username = st.text_input("Nom d'utilisateur", placeholder="Entrez votre nom d'utilisateur")
+            password = st.text_input("Mot de passe", type="password", placeholder="Entrez votre mot de passe")
+            login_button = st.form_submit_button("Se connecter", use_container_width=True)
+            
+            if login_button:
+                if check_credentials(username, password):
+                    st.session_state["user"] = username
+                    st.success(f"Bienvenue {username} !")
+                    st.rerun()
+                else:
+                    st.error("Nom d'utilisateur ou mot de passe incorrect")
+        
+        # Aide pour les utilisateurs demo
+        with st.expander("ℹ️ Comptes de démonstration"):
+            st.write("**Utilisateurs disponibles:**")
+            st.write("- alice / alice123")
+            st.write("- bob / bob456") 
+            st.write("- demo / demo123")
+
+def show_home_page(user, df):
+    """Page d'accueil"""
+    st.title(f"👋 Bonjour {user} !")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("""
+        ### 🎓 Bienvenue dans ton espace GradeTrack personnalisé
+        
+        Cette application te permet de :
+        - ➕ **Ajouter tes notes** avec leurs coefficients
+        - 📋 **Consulter et modifier** tes notes existantes
+        - 📈 **Visualiser tes statistiques** par trimestre
+        - 📤 **Exporter tes données** en CSV
+        
+        Utilise le menu à gauche pour naviguer entre les différentes fonctionnalités.
+        """)
+        
+        if not df.empty:
+            st.markdown("### 📊 Résumé de tes notes")
+            stats = calculer_statistiques_detaillees(df)
+            if stats:
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    st.metric("Moyenne générale", f"{stats['moyenne']}/20")
+                with col_b:
+                    st.metric("Notes enregistrées", stats['nombre_notes'])
+                with col_c:
+                    st.metric("Matières suivies", stats['nombre_matieres'])
+    
+    with col2:
+        if df.empty:
+            st.info("🎯 Commence par ajouter ta première note !")
         else:
-            st.sidebar.warning("Cet élève existe déjà.")
+            st.markdown("### 🏆 Dernières notes ajoutées")
+            recent_notes = df.tail(3)
+            for _, row in recent_notes.iterrows():
+                st.markdown(f"**{row['Matière']}** : {row['Note']}/20 (T{row['Trimestre']})")
 
-# Réinitialisation (admin)
-if st.sidebar.button("🔁 Réinitialiser toutes les données"):
-    st.session_state.data = []
-    sauvegarder_donnees()
-    st.sidebar.success("Toutes les données ont été supprimées.")
-    st.experimental_rerun()
+def show_add_note_page(user, df):
+    """Page d'ajout de note"""
+    st.title("➕ Ajouter une nouvelle note")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        with st.form("form_ajout", clear_on_submit=True):
+            st.markdown("### 📝 Informations de la note")
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                matiere = st.text_input("Matière *", placeholder="Ex: Mathématiques")
+                note = st.number_input("Note (/20) *", min_value=0.0, max_value=20.0, step=0.1, value=10.0)
+            
+            with col_b:
+                coef = st.number_input("Coefficient *", min_value=0.1, step=0.1, value=1.0)
+                trimestre = st.selectbox("Trimestre *", ["1", "2", "3"])
+            
+            valider = st.form_submit_button("✅ Ajouter la note", use_container_width=True)
+            
+            if valider:
+                errors = valider_note(note, coef, matiere, trimestre)
+                if errors:
+                    for error in errors:
+                        st.error(error)
+                else:
+                    # Ajouter la date
+                    nouvelle = {
+                        "Matière": matiere.strip(),
+                        "Note": note,
+                        "Coefficient": coef,
+                        "Trimestre": trimestre,
+                        "Date": datetime.now().strftime("%Y-%m-%d")
+                    }
+                    df = pd.concat([df, pd.DataFrame([nouvelle])], ignore_index=True)
+                    st.session_state["data"] = df
+                    
+                    if save_user_data(user, df):
+                        st.success(f"✅ Note ajoutée avec succès : {matiere} - {note}/20 (coef {coef}) au trimestre {trimestre}")
+                    else:
+                        st.error("❌ Erreur lors de la sauvegarde")
+    
+    with col2:
+        if not df.empty:
+            st.markdown("### 📊 Aperçu actuel")
+            for t in sorted(df["Trimestre"].unique()):
+                dft = df[df["Trimestre"] == t]
+                moyenne_t = calculer_moyenne(dft)
+                if moyenne_t:
+                    st.metric(f"Trimestre {t}", f"{moyenne_t}/20")
 
-# Formulaire ajout de note
-with st.form(f"form_{eleve_choisi}"):
-    st.markdown(f"### Ajouter une note pour {eleve_choisi}")
-    matiere = st.text_input("Matière")
-    note = st.number_input("Note (0-20)", 0.0, 20.0, step=0.1)
-    coef = st.number_input("Coefficient", 0.1, 10.0, step=0.1)
-    trimestre = st.selectbox("Trimestre", ["1", "2", "3"])
-    submit = st.form_submit_button("➕ Ajouter la note")
+def show_view_notes_page(user, df):
+    """Page de consultation des notes"""
+    st.title("📋 Notes enregistrées")
+    
+    if df.empty:
+        st.info("📝 Aucune note enregistrée. Commence par ajouter ta première note !")
+        return
+    
+    # Filtres
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        trimestre_filter = st.selectbox("Filtrer par trimestre", ["Tous"] + sorted(df["Trimestre"].unique()))
+    with col2:
+        matiere_filter = st.selectbox("Filtrer par matière", ["Toutes"] + sorted(df["Matière"].unique()))
+    
+    # Application des filtres
+    df_filtered = df.copy()
+    if trimestre_filter != "Tous":
+        df_filtered = df_filtered[df_filtered["Trimestre"] == trimestre_filter]
+    if matiere_filter != "Toutes":
+        df_filtered = df_filtered[df_filtered["Matière"] == matiere_filter]
+    
+    if df_filtered.empty:
+        st.warning("Aucune note ne correspond aux filtres sélectionnés.")
+        return
+    
+    st.markdown(f"### 📊 {len(df_filtered)} note(s) affichée(s)")
+    
+    # Éditeur de données
+    edited_df = st.data_editor(
+        df_filtered,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Note": st.column_config.NumberColumn(
+                "Note (/20)",
+                min_value=0,
+                max_value=20,
+                step=0.1
+            ),
+            "Coefficient": st.column_config.NumberColumn(
+                "Coefficient",
+                min_value=0.1,
+                step=0.1
+            )
+        }
+    )
+    
+    # Sauvegarde automatique si modifié
+    if not edited_df.equals(df_filtered):
+        # Mise à jour du DataFrame principal
+        for index, row in edited_df.iterrows():
+            mask = (df["Matière"] == row["Matière"]) & \
+                   (df["Trimestre"] == row["Trimestre"]) & \
+                   (df["Note"] == df.loc[index, "Note"]) & \
+                   (df["Coefficient"] == df.loc[index, "Coefficient"])
+            df.loc[mask] = row
+        
+        st.session_state["data"] = df
+        if save_user_data(user, df):
+            st.success("✅ Modifications sauvegardées automatiquement")
 
-    if submit:
-        if eleve_choisi in [None, "", "-- Nouvel élève --"]:
-)
-if not df.empty:
-    df['Note'] = pd.to_numeric(df['Note'], errors='coerce')
-    df['Coefficient'] = pd.to_numeric(df['Coefficient'], errors='coerce')
-df_eleve = df[df['Eleve'] == eleve_choisi] if eleve_choisi in df['Eleve'].values else pd.DataFrame()
-
-# Filtres
-if not df_eleve.empty:
-    matieres = sorted(df_eleve['Matiere'].unique())
-    filtre_matiere = st.sidebar.selectbox("Filtrer par matière", ["Toutes"] + matieres)
-    if filtre_matiere != "Toutes":
-        df_eleve = df_eleve[df_eleve['Matiere'] == filtre_matiere]
-
-    filtre_trimestre = st.sidebar.selectbox("Filtrer par trimestre", ["Tous", "1", "2", "3"])
-    if filtre_trimestre != "Tous":
-        df_eleve = df_eleve[df_eleve['Trimestre'] == filtre_trimestre]
-
-# Onglets
-tab1, tab2, tab3 = st.tabs(["📄 Notes & Moyennes", "📚 Statistiques", "📊 Graphiques"])
-
-with tab1:
-    st.subheader(f"Notes enregistrées - {eleve_choisi}")
-    if not df_eleve.empty:
-        for idx, row in df_eleve.reset_index(drop=True).iterrows():
-            c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
-            c1.write(row['Matiere'])
-            c2.write(row['Note'])
-            c3.write(row['Coefficient'])
-            c4.write(f"T{row['Trimestre']}")
-            if c5.button("🗑️", key=f"del_{row['id']}"):
-                supprimer_note(row['id'])
-
-        moyennes = {t: calcul_moyenne(df_eleve[df_eleve['Trimestre'] == t]) for t in ['1', '2', '3']}
-        moy_globale = calcul_moyenne(df_eleve)
-
+def show_statistics_page(df):
+    """Page des statistiques"""
+    st.title("📈 Statistiques détaillées")
+    
+    if df.empty:
+        st.info("📊 Ajoute des notes pour voir les statistiques.")
+        return
+    
+    # Statistiques générales
+    stats = calculer_statistiques_detaillees(df)
+    if stats:
+        st.markdown("### 🎯 Vue d'ensemble")
         col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(f"**T1 :** <span style='color:{couleur_moyenne(moyennes['1'])}'>{(moyennes['1'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col2.markdown(f"**T2 :** <span style='color:{couleur_moyenne(moyennes['2'])}'>{(moyennes['2'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col3.markdown(f"**T3 :** <span style='color:{couleur_moyenne(moyennes['3'])}'>{(moyennes['3'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col4.markdown(f"**Générale :** <span style='color:{couleur_moyenne(moy_globale)}'>{(moy_globale or 0):.2f}</span>", unsafe_allow_html=True)
-    else:
-        st.info("Aucune note trouvée pour cet élève.")
+        
+        with col1:
+            st.metric("Moyenne générale", f"{stats['moyenne']}/20")
+        with col2:
+            st.metric("Note minimale", f"{stats['note_min']}/20")
+        with col3:
+            st.metric("Note maximale", f"{stats['note_max']}/20")
+        with col4:
+            st.metric("Total des notes", stats['nombre_notes'])
+    
+    # Statistiques par trimestre
+    st.markdown("### 📅 Analyse par trimestre")
+    
+    for t in sorted(df["Trimestre"].unique()):
+        st.subheader(f"Trimestre {t}")
+        dft = df[df["Trimestre"] == t]
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            moyenne_t = calculer_moyenne(dft)
+            if moyenne_t is not None:
+                st.metric(f"Moyenne T{t}", f"{moyenne_t}/20")
+                st.write(f"📊 {len(dft)} note(s)")
+                st.write(f"🎯 {dft['Matière'].nunique()} matière(s)")
+        
+        with col2:
+            # Graphique des notes par matière
+            if not dft.empty:
+                fig, ax = plt.subplots(figsize=(10, 4))
+                bars = ax.bar(dft["Matière"], dft["Note"], color='royalblue', alpha=0.7)
+                ax.set_ylim(0, 20)
+                ax.set_ylabel("Note (/20)")
+                ax.set_title(f"Notes du Trimestre {t}")
+                ax.axhline(y=moyenne_t if moyenne_t else 0, color='red', linestyle='--', alpha=0.7, label=f'Moyenne ({moyenne_t}/20)')
+                ax.legend()
+                
+                # Rotation des labels si nécessaire
+                if len(dft["Matière"].unique()) > 5:
+                    plt.xticks(rotation=45, ha='right')
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
+    
+    # Graphique global
+    st.markdown("### 📊 Vue d'ensemble des notes")
+    if len(df) > 1:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+        
+        # Histogramme des notes
+        ax1.hist(df["Note"], bins=10, color='skyblue', alpha=0.7, edgecolor='black')
+        ax1.set_xlabel("Note")
+        ax1.set_ylabel("Fréquence")
+        ax1.set_title("Distribution des notes")
+        ax1.axvline(x=stats['moyenne'], color='red', linestyle='--', label=f'Moyenne ({stats["moyenne"]}/20)')
+        ax1.legend()
+        
+        # Notes par matière (moyennes)
+        moyennes_matieres = df.groupby("Matière").apply(lambda x: calculer_moyenne(x)).sort_values(ascending=True)
+        ax2.barh(moyennes_matieres.index, moyennes_matieres.values, color='lightcoral', alpha=0.7)
+        ax2.set_xlabel("Moyenne (/20)")
+        ax2.set_title("Moyennes par matière")
+        ax2.axvline(x=stats['moyenne'], color='red', linestyle='--', alpha=0.7)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
 
-with tab2:
-    st.subheader(f"Statistiques par matière - {eleve_choisi}")
-    if not df_eleve.empty:
-        stats = df_eleve.groupby('Matiere').apply(
-            lambda g: pd.Series({
-                'Moyenne': calcul_moyenne(g),
-                'Nb Notes': len(g),
-                'Total Coef': g['Coefficient'].sum()
-            })
-        ).reset_index()
-        st.dataframe(stats)
-    else:
-        st.info("Pas encore de notes pour cet élève.")
+def show_export_page(user, df):
+    """Page d'export"""
+    st.title("📤 Exporter les données")
+    
+    if df.empty:
+        st.info("📄 Aucune donnée à exporter.")
+        return
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 💾 Export CSV")
+        st.write(f"📊 {len(df)} note(s) à exporter")
+        
+        # Options d'export
+        include_stats = st.checkbox("Inclure les statistiques", value=True)
+        
+        # Génération du CSV
+        csv_data = df.to_csv(index=False).encode("utf-8")
+        
+        if include_stats:
+            stats = calculer_statistiques_detaillees(df)
+            stats_text = f"\n\n# Statistiques générales\n"
+            stats_text += f"# Moyenne générale: {stats['moyenne']}/20\n"
+            stats_text += f"# Nombre total de notes: {stats['nombre_notes']}\n"
+            stats_text += f"# Nombre de matières: {stats['nombre_matieres']}\n"
+            csv_data += stats_text.encode("utf-8")
+        
+        st.download_button(
+            label="📥 Télécharger le fichier CSV",
+            data=csv_data,
+            file_name=f"{user}_notes_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col2:
+        st.markdown("### 👀 Aperçu des données")
+        st.dataframe(df, use_container_width=True)
 
-with tab3:
-    st.subheader(f"Graphiques - {eleve_choisi}")
-    if not df_eleve.empty:
-        # Évolution trimestrielle
-        moy_trimestres = [calcul_moyenne(df_eleve[df_eleve['Trimestre'] == t]) or 0 for t in ['1', '2', '3']]
-        fig1, ax1 = plt.subplots()
-        ax1.plot(['1', '2', '3'], moy_trimestres, marker='o', color='blue')
-        ax1.set_ylim(0, 20)
-        ax1.set_title("Évolution des moyennes trimestrielles")
-        ax1.set_xlabel("Trimestre")
-        ax1.set_ylabel("Moyenne")
-        ax1.grid(True)
-        st.pyplot(fig1)
+def show_logout_page():
+    """Page de déconnexion"""
+    st.title("🔓 Déconnexion")
+    st.write("Êtes-vous sûr de vouloir vous déconnecter ?")
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("✅ Confirmer la déconnexion", use_container_width=True):
+            st.session_state.clear()
+            st.success("Déconnexion réussie !")
+            st.rerun()
 
-        # Moyenne par matière
-        moy_matiere = df_eleve.groupby('Matiere').apply(calcul_moyenne)
-        fig2, ax2 = plt.subplots()
-        moy_matiere.plot(kind='bar', ax=ax2, color='skyblue')
-        counts = df_eleve['Matiere'].value_counts()
-        for i, (label, val) in enumerate(moy_matiere.items()):
-            ax2.text(i, val + 0.3, f"{counts[label]} note(s)", ha='center', fontsize=8)
-        ax2.set_ylim(0, 20)
-        ax2.set_title("Moyenne par matière")
-        ax2.set_ylabel("Moyenne")
-        st.pyplot(fig2)
+# ========== Lancement de l'application ==========
 
-        # Camembert
-        coef_matiere = df_eleve.groupby('Matiere')['Coefficient'].sum()
-        if len(coef_matiere) > 1:
-            fig3, ax3 = plt.subplots()
-            ax3.pie(coef_matiere, labels=coef_matiere.index, autopct='%1.1f%%', startangle=90)
-            ax3.set_title("Répartition des coefficients par matière")
-            st.pyplot(fig3)
-        else:
-            st.info("Pas assez de matières pour générer un camembert.")
-    else:
-        st.info("Pas encore de notes pour cet élève.")
-
-# Export CSV
-if not df_eleve.empty:
-    export_df = df_eleve.drop(columns=['id']) if 'id' in df_eleve else df_eleve
-    csv_buffer = io.StringIO()
-    export_df.to_csv(csv_buffer, index=False)
-    st.download_button("⬇️ Exporter les notes CSV", csv_buffer.getvalue(), file_name=f"notes_{eleve_choisi}.csv", mime="text/csv")
+if __name__ == "__main__":
+    main()
