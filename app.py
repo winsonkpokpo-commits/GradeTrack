@@ -89,8 +89,8 @@ def valider_note(note, coef, matiere, trimestre):
         errors.append("La matière ne peut pas être vide")
     if note < 0 or note > 20:
         errors.append("La note doit être entre 0 et 20")
-    if coef <= 0:
-        errors.append("Le coefficient doit être positif")
+    if coef <= 0 or coef > 6:
+        errors.append("Le coefficient doit être entre 0.1 et 6")
     if trimestre not in ["1", "2", "3"]:
         errors.append("Le trimestre doit être 1, 2 ou 3")
     return errors
@@ -264,7 +264,7 @@ def show_add_note_page(user, df):
                 note = st.number_input("Note (/20) *", min_value=0.0, max_value=20.0, step=0.1, value=10.0)
             
             with col_b:
-                coef = st.number_input("Coefficient *", min_value=0.1, step=0.1, value=1.0)
+                coef = st.number_input("Coefficient *", min_value=0.1, max_value=6.0, step=0.1, value=1.0)
                 trimestre = st.selectbox("Trimestre *", ["1", "2", "3"])
             
             valider = st.form_submit_button("✅ Ajouter la note", use_container_width=True)
@@ -343,6 +343,7 @@ def show_view_notes_page(user, df):
             "Coefficient": st.column_config.NumberColumn(
                 "Coefficient",
                 min_value=0.1,
+                max_value=6.0,
                 step=0.1
             )
         }
