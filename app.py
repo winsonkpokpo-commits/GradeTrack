@@ -1,14 +1,11 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import hashlib
 import os
-import json
 from datetime import datetime
 
 # ========== Configuration et constantes ==========
 
-# Configuration de la page
 st.set_page_config(
     page_title="GradeTrack Complet", 
     layout="wide",
@@ -21,7 +18,7 @@ def hash_password(password):
     """Hash un mot de passe avec SHA-256"""
     return hashlib.sha256(password.encode()).hexdigest()
 
-# Base utilisateurs simple (à remplacer par vrai stockage sécurisé)
+# Base utilisateurs simple
 USERS = {
     "alice": hash_password("alice123"),
     "bob": hash_password("bob456"),
@@ -34,21 +31,14 @@ def check_credentials(username, password):
 
 def get_data_path(username):
     """Retourne le chemin du fichier de données pour un utilisateur"""
-    return f"data/{username}_notes.csv"
-
-def ensure_data_directory():
-    """S'assure que le dossier data existe"""
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    return f"{username}_notes.csv"
 
 def load_user_data(username):
     """Charge les données d'un utilisateur"""
-    ensure_data_directory()
     path = get_data_path(username)
     if os.path.exists(path):
         try:
             df = pd.read_csv(path)
-            # Validation des colonnes
             required_columns = ["Matière", "Note", "Coefficient", "Trimestre"]
             if not all(col in df.columns for col in required_columns):
                 return create_empty_dataframe()
@@ -65,7 +55,6 @@ def create_empty_dataframe():
 
 def save_user_data(username, df):
     """Sauvegarde les données d'un utilisateur"""
-    ensure_data_directory()
     try:
         df.to_csv(get_data_path(username), index=False)
         return True
@@ -126,12 +115,13 @@ def load_custom_css():
         border-radius: 0.25rem;
         border: 1px solid #c3e6cb;
     }
-    .warning-message {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 0.75rem;
-        border-radius: 0.25rem;
-        border: 1px solid #ffeaa7;
+    .grade-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 0.5rem 0;
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -253,9 +243,10 @@ def show_home_page(user, df):
             st.info("🎯 Commence par ajouter ta première note !")
         else:
             st.markdown("### 🏆 Dernières notes ajoutées")
-            recent_notes = df.tail(3)
+            recent_notes = df.tail(5)
             for _, row in recent_notes.iterrows():
-                st.markdown(f"**{row['Matière']}** : {row['Note']}/20 (T{row['Trimestre']})")
+                color = "🟢" if row['Note'] >= 15 else "🟡" if row['Note'] >= 10 else "🔴"
+                st.markdown(f"{color} **{row['Matière']}** : {row['Note']}/20 (T{row['Trimestre']})")
 
 def show_add_note_page(user, df):
     """Page d'ajout de note"""
@@ -357,19 +348,13 @@ def show_view_notes_page(user, df):
         }
     )
     
-    # Sauvegarde automatique si modifié
-    if not edited_df.equals(df_filtered):
-        # Mise à jour du DataFrame principal
-        for index, row in edited_df.iterrows():
-            mask = (df["Matière"] == row["Matière"]) & \
-                   (df["Trimestre"] == row["Trimestre"]) & \
-                   (df["Note"] == df.loc[index, "Note"]) & \
-                   (df["Coefficient"] == df.loc[index, "Coefficient"])
-            df.loc[mask] = row
-        
-        st.session_state["data"] = df
-        if save_user_data(user, df):
-            st.success("✅ Modifications sauvegardées automatiquement")
+    # Note: La sauvegarde automatique est simplifiée pour éviter les erreurs
+    if st.button("💾 Sauvegarder les modifications"):
+        st.session_state["data"] = edited_df
+        if save_user_data(user, edited_df):
+            st.success("✅ Modifications sauvegardées!")
+        else:
+            st.error("❌ Erreur lors de la sauvegarde")
 
 def show_statistics_page(df):
     """Page des statistiques"""
@@ -411,47 +396,27 @@ def show_statistics_page(df):
                 st.write(f"🎯 {dft['Matière'].nunique()} matière(s)")
         
         with col2:
-            # Graphique des notes par matière
+            # Graphique simple avec st.bar_chart
             if not dft.empty:
-                fig, ax = plt.subplots(figsize=(10, 4))
-                bars = ax.bar(dft["Matière"], dft["Note"], color='royalblue', alpha=0.7)
-                ax.set_ylim(0, 20)
-                ax.set_ylabel("Note (/20)")
-                ax.set_title(f"Notes du Trimestre {t}")
-                ax.axhline(y=moyenne_t if moyenne_t else 0, color='red', linestyle='--', alpha=0.7, label=f'Moyenne ({moyenne_t}/20)')
-                ax.legend()
-                
-                # Rotation des labels si nécessaire
-                if len(dft["Matière"].unique()) > 5:
-                    plt.xticks(rotation=45, ha='right')
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
+                chart_data = dft.set_index('Matière')['Note']
+                st.bar_chart(chart_data, height=300)
+                st.caption(f"Notes du Trimestre {t}")
     
-    # Graphique global
+    # Vue d'ensemble avec graphiques Streamlit natifs
     st.markdown("### 📊 Vue d'ensemble des notes")
-    if len(df) > 1:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # Graphique des moyennes par matière
+    if not df.empty:
+        moyennes_matieres = df.groupby("Matière").apply(lambda x: calculer_moyenne(x))
+        moyennes_matieres = moyennes_matieres.dropna()
         
-        # Histogramme des notes
-        ax1.hist(df["Note"], bins=10, color='skyblue', alpha=0.7, edgecolor='black')
-        ax1.set_xlabel("Note")
-        ax1.set_ylabel("Fréquence")
-        ax1.set_title("Distribution des notes")
-        ax1.axvline(x=stats['moyenne'], color='red', linestyle='--', label=f'Moyenne ({stats["moyenne"]}/20)')
-        ax1.legend()
+        if not moyennes_matieres.empty:
+            st.markdown("#### Moyennes par matière")
+            st.bar_chart(moyennes_matieres, height=400)
         
-        # Notes par matière (moyennes)
-        moyennes_matieres = df.groupby("Matière").apply(lambda x: calculer_moyenne(x)).sort_values(ascending=True)
-        ax2.barh(moyennes_matieres.index, moyennes_matieres.values, color='lightcoral', alpha=0.7)
-        ax2.set_xlabel("Moyenne (/20)")
-        ax2.set_title("Moyennes par matière")
-        ax2.axvline(x=stats['moyenne'], color='red', linestyle='--', alpha=0.7)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
+        # Distribution des notes avec histogramme
+        st.markdown("#### Distribution des notes")
+        st.histogram(df, x="Note", bins=10)
 
 def show_export_page(user, df):
     """Page d'export"""
