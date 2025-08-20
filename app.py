@@ -1,6 +1,5 @@
 """
 GradeTrack - Application Streamlit pour le suivi des notes et moyennes
-Version sans matplotlib, avec Altair pour les graphiques.
 """
 
 import streamlit as st
