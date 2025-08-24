@@ -1,340 +1,340 @@
-"""
-GradeTrack - Application Streamlit pour le suivi des notes et moyennes
-"""
-
+# Grade_track_V6_with_html.py
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
-import altair as alt
-import io
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 import os
 import uuid
-from typing import List, Dict, Any, Optional
+import time
+import io
+import numpy as np
 
-# --- Configuration ---
-st.set_page_config(page_title="GradeTrack", layout="wide")
-CSV_PATH = "notes.csv"
-EXPECTED_COLS = ["id", "Eleve", "Matiere", "Note", "Coefficient", "Trimestre"]
+# --- Configuration / constantes ---
+CSV_PATH = "gradetrack_data.csv"
+EXPECTED_COLS = ['id','Eleve','Classe','Matiere','Note','Coefficient','Trimestre','Date','Commentaire']
 
-# --- Fonctions utilitaires ---
-def charger_donnees() -> List[Dict[str, Any]]:
-    if os.path.exists(CSV_PATH):
+st.set_page_config(
+    page_title="GradeTrack Modern",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------- DataManager ----------------
+class DataManager:
+    """Gestionnaire de données avec cache Streamlit"""
+    @staticmethod
+    @st.cache_data(ttl=60)
+    def load_data():
+        if os.path.exists(CSV_PATH):
+            try:
+                df = pd.read_csv(CSV_PATH)
+                # ajouter colonnes manquantes
+                for col in EXPECTED_COLS:
+                    if col not in df.columns:
+                        if col == "Date":
+                            df[col] = datetime.now().strftime("%Y-%m-%d")
+                        elif col == "Classe":
+                            df[col] = "Non assignée"
+                        else:
+                            df[col] = "" if col == "Commentaire" else None
+                # réordonner
+                df = df.reindex(columns=EXPECTED_COLS)
+                # ids
+                if 'id' in df.columns:
+                    df['id'] = df['id'].fillna('').astype(str)
+                    missing = (df['id'] == '') | df['id'].isna()
+                    if missing.any():
+                        df.loc[missing, 'id'] = [str(uuid.uuid4()) for _ in range(missing.sum())]
+                else:
+                    df['id'] = [str(uuid.uuid4()) for _ in range(len(df))]
+                return df
+            except Exception as e:
+                st.error(f"Erreur lors du chargement: {e}")
+                return pd.DataFrame(columns=EXPECTED_COLS)
+        # fichier absent -> vide
+        return pd.DataFrame(columns=EXPECTED_COLS)
+
+    @staticmethod
+    def save_data(df):
         try:
-            df = pd.read_csv(CSV_PATH)
-            for col in EXPECTED_COLS:
-                if col not in df.columns:
-                    df[col] = None
-            df = df.reindex(columns=EXPECTED_COLS)
-            # s'assurer que chaque ligne a un id
-            df['id'] = df['id'].fillna('').astype(str)
-            df.loc[df['id'] == '', 'id'] = [str(uuid.uuid4()) for _ in range((df['id'] == '').sum())]
-            return df.to_dict(orient="records")
+            df.to_csv(CSV_PATH, index=False)
+            # vider le cache
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True
         except Exception as e:
-            st.warning(f"Erreur lors du chargement des données : {e}")
-            return []
-    return []
+            st.error(f"Erreur lors de la sauvegarde: {e}")
+            return False
 
-def sauvegarder_donnees() -> None:
-    try:
-        df = pd.DataFrame(st.session_state.data)
-        for col in EXPECTED_COLS:
-            if col not in df.columns:
-                df[col] = None
-        df = df.reindex(columns=EXPECTED_COLS)
-        tmp_path = CSV_PATH + ".tmp"
-        df.to_csv(tmp_path, index=False)
-        os.replace(tmp_path, CSV_PATH)
-    except Exception as e:
-        st.error(f"Erreur lors de la sauvegarde : {e}")
+    @staticmethod
+    def calculate_statistics(df):
+        if df is None or df.empty:
+            return {}
+        df_clean = df.copy()
+        df_clean['Note'] = pd.to_numeric(df_clean['Note'], errors='coerce')
+        df_clean = df_clean.dropna(subset=['Note'])
+        if df_clean.empty:
+            return {}
+        notes = df_clean['Note']
+        moy_par_matiere = df_clean.groupby('Matiere')['Note'].mean().round(2).to_dict()
+        return {
+            'nb_eleves': int(df['Eleve'].nunique()) if 'Eleve' in df else 0,
+            'nb_notes': int(len(df_clean)),
+            'moyenne_generale': float(notes.mean()),
+            'mediane': float(notes.median()),
+            'note_min': float(notes.min()),
+            'note_max': float(notes.max()),
+            'ecart_type': float(notes.std()),
+            'taux_reussite': float((notes >= 10).mean() * 100),
+            'taux_excellence': float((notes >= 16).mean() * 100),
+            'notes_par_trimestre': df_clean.groupby('Trimestre')['Note'].count().to_dict(),
+            'moyenne_par_classe': df_clean.groupby('Classe')['Note'].mean().round(2).to_dict(),
+            'moyenne_par_matiere': moy_par_matiere
+        }
 
-def ajouter_note(eleve: str, matiere: str, note: float, coef: float, trimestre: str) -> None:
-    if not eleve or eleve.strip() == "":
-        st.error("Nom d'élève invalide")
-        return
-    if not matiere or matiere.strip() == "":
-        st.error("Matière invalide")
-        return
-    try:
-        note_val = float(note)
-        coef_val = float(coef)
-    except Exception:
-        st.error("Note ou coefficient invalide")
-        return
-    nouvelle = {
-        "id": str(uuid.uuid4()),
-        "Eleve": eleve.strip(),
-        "Matiere": matiere.strip(),
-        "Note": note_val,
-        "Coefficient": coef_val,
-        "Trimestre": str(trimestre),
-    }
-    st.session_state.data.append(nouvelle)
-    sauvegarder_donnees()
-
-def supprimer_note(note_id: str) -> None:
-    original_len = len(st.session_state.data)
-    st.session_state.data = [n for n in st.session_state.data if n.get("id") != note_id]
-    if len(st.session_state.data) < original_len:
-        sauvegarder_donnees()
-        st.success("Note supprimée avec succès")
-        st.experimental_rerun()
-    else:
-        st.warning("ID non trouvé : impossible de supprimer la note")
-
-def calcul_moyenne(df: pd.DataFrame) -> Optional[float]:
-    if df is None or df.empty:
-        return None
-    df = df.copy()
-    df['Note'] = pd.to_numeric(df['Note'], errors='coerce')
-    df['Coefficient'] = pd.to_numeric(df['Coefficient'], errors='coerce')
-    df = df.dropna(subset=['Note', 'Coefficient'])
-    total_coef = df['Coefficient'].sum()
-    if total_coef == 0:
-        return None
-    weighted_sum = (df['Note'] * df['Coefficient']).sum()
-    return float(weighted_sum / total_coef)
-
-def couleur_moyenne(moy: Optional[float]) -> str:
-    if moy is None:
-        return "gray"
-    if moy >= 16:
-        return "green"
-    if moy >= 12:
-        return "orange"
-    return "red"
-
-def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    return df.to_csv(index=False).encode('utf-8')
-
-# --- Initialisation de l'état ---
-if 'data' not in st.session_state:
-    st.session_state.data = charger_donnees()
-
-# --- Sidebar ---
-st.sidebar.title("Contrôles")
-
-# Importer CSV (ajouter ou remplacer)
-uploaded = st.sidebar.file_uploader("Importer un CSV (colonnes attendues: Eleve,Matiere,Note,Coefficient,Trimestre)", type=['csv'])
-if uploaded is not None:
-    try:
-        df_up = pd.read_csv(uploaded)
-        # normaliser colonnes
-        for col in EXPECTED_COLS:
-            if col not in df_up.columns:
-                df_up[col] = None
-        df_up = df_up.reindex(columns=EXPECTED_COLS)
-        # créer id si manquant
-        df_up['id'] = df_up['id'].fillna('')
-        missing_ids = (df_up['id'] == '')
-        df_up.loc[missing_ids, 'id'] = [str(uuid.uuid4()) for _ in range(missing_ids.sum())]
-        # option: ajouter ou remplacer
-        mode = st.sidebar.radio("Mode d'import", options=["Ajouter aux données", "Remplacer toutes les données"])
-        if st.sidebar.button("📥 Valider l'import"):
-            if mode == "Remplacer toutes les données":
-                st.session_state.data = df_up.to_dict(orient="records")
-            else:
-                # concat en évitant les duplications d'id
-                existing_ids = {d['id'] for d in st.session_state.data}
-                new_records = [r for r in df_up.to_dict(orient="records") if r['id'] not in existing_ids]
-                st.session_state.data.extend(new_records)
-            sauvegarder_donnees()
-            st.sidebar.success("Import effectué.")
-            st.experimental_rerun()
-    except Exception as e:
-        st.sidebar.error(f"Erreur à l'import : {e}")
-
-eleves = sorted({(d.get('Eleve') or '').strip() for d in st.session_state.data if (d.get('Eleve') or '').strip()})
-eleves_with_option = ["-- Nouvel élève --"] + eleves
-
-selected = st.sidebar.selectbox("🎓 Choisir un élève", options=eleves_with_option)
-new_name = ""
-if selected == "-- Nouvel élève --":
-    new_name = st.sidebar.text_input("Nom du nouvel élève")
-    if st.sidebar.button("➕ Créer l'élève"):
-        if not new_name or new_name.strip() == "":
-            st.sidebar.warning("Entrez un nom valide.")
-        elif new_name.strip() in eleves:
-            st.sidebar.warning("Cet élève existe déjà.")
-        else:
-            eleves.append(new_name.strip())
-            st.session_state.data.append({
-                "id": str(uuid.uuid4()),
-                "Eleve": new_name.strip(),
-                "Matiere": "",
-                "Note": 0.0,
-                "Coefficient": 0.0,
-                "Trimestre": "1",
-            })
-            sauvegarder_donnees()
-            st.sidebar.success(f"Élève '{new_name.strip()}' créé.")
-            st.experimental_rerun()
-
-if st.sidebar.button("🔁 Réinitialiser toutes les données"):
-    if st.sidebar.checkbox("Confirmer la suppression de toutes les données"):
-        st.session_state.data = []
-        sauvegarder_donnees()
-        st.sidebar.success("Toutes les données ont été supprimées.")
-        st.experimental_rerun()
-
-# bouton de téléchargement (export)
-try:
-    df_full = pd.DataFrame(st.session_state.data)
-    if not df_full.empty:
-        csv_bytes = dataframe_to_csv_bytes(df_full)
-        st.sidebar.download_button("📤 Exporter toutes les données (CSV)", data=csv_bytes, file_name="notes_export.csv", mime="text/csv")
-except Exception:
-    pass
-
-st.title("📊 GradeTrack - Suivi des notes et moyennes")
-if selected == "-- Nouvel élève --" and not (new_name and new_name.strip()):
-    st.info("Créez un nouvel élève depuis la barre latérale puis revenez ici pour ajouter des notes.")
-
-# --- Formulaire ---
-with st.form("form_ajout_note", clear_on_submit=True):
-    st.subheader("Ajouter une note")
-    eleve_input = selected
-    if selected == "-- Nouvel élève --" and new_name and new_name.strip():
-        eleve_input = new_name.strip()
-    matiere = st.text_input("Matière")
-    note = st.number_input("Note (0-20)", min_value=0.0, max_value=20.0, value=10.0, step=0.1)
-    coef = st.number_input("Coefficient", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-    trimestre = st.selectbox("Trimestre", ["1", "2", "3"])
-    submit = st.form_submit_button("➕ Ajouter la note")
-    if submit:
-        if eleve_input in [None, "", "-- Nouvel élève --"]:
-            st.warning("Veuillez sélectionner ou créer un élève avant d'ajouter une note.")
-        else:
-            if not matiere or matiere.strip() == "":
-                st.warning("Veuillez entrer une matière valide.")
-            else:
-                ajouter_note(eleve_input, matiere.strip(), note, coef, trimestre)
-                st.success(f"Note ajoutée pour {eleve_input} — {matiere.strip()} : {note} (coef {coef})")
-                st.experimental_rerun()
-
-# --- DataFrame ---
-try:
-    df = pd.DataFrame(st.session_state.data)
-except Exception:
-    df = pd.DataFrame(columns=EXPECTED_COLS)
-
-for col in EXPECTED_COLS:
-    if col not in df.columns:
-        df[col] = None
-
-if not df.empty:
-    df['Note'] = pd.to_numeric(df['Note'], errors='coerce')
-    df['Coefficient'] = pd.to_numeric(df['Coefficient'], errors='coerce')
-
-eleve_choisi: Optional[str] = None
-if selected == "-- Nouvel élève --":
-    if new_name and new_name.strip():
-        eleve_choisi = new_name.strip()
-else:
-    eleve_choisi = selected
-
-if (not eleve_choisi or eleve_choisi == "-- Nouvel élève --") and eleves:
-    eleve_choisi = eleves[0]
-
-if eleve_choisi and eleve_choisi in df['Eleve'].values:
-    df_eleve = df[df['Eleve'] == eleve_choisi].copy()
-else:
-    df_eleve = pd.DataFrame(columns=df.columns)
-
-if not df_eleve.empty:
-    matieres = sorted(df_eleve['Matiere'].dropna().unique())
-    filtre_matiere = st.sidebar.selectbox("Filtrer par matière", options=["Toutes"] + matieres)
-    if filtre_matiere != "Toutes":
-        df_eleve = df_eleve[df_eleve['Matiere'] == filtre_matiere]
-    filtre_trimestre = st.sidebar.selectbox("Filtrer par trimestre", options=["Tous", "1", "2", "3"])
-    if filtre_trimestre != "Tous":
-        df_eleve = df_eleve[df_eleve['Trimestre'] == filtre_trimestre]
-
-# --- Onglets ---
-tab1, tab2, tab3 = st.tabs(["📄 Notes & Moyennes", "📚 Statistiques", "📊 Graphiques"])
-
-with tab1:
-    st.subheader(f"Notes enregistrées — {eleve_choisi if eleve_choisi else '—'}")
-    if not df_eleve.empty:
-        for idx, row in df_eleve.reset_index(drop=True).iterrows():
-            c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
-            c1.write(row.get('Matiere', ''))
-            c2.write(row.get('Note', ''))
-            c3.write(row.get('Coefficient', ''))
-            c4.write(f"T{row.get('Trimestre', '')}")
-            key_del = f"del_{row.get('id')}_{idx}"
-            if c5.button("🗑️", key=key_del):
-                supprimer_note(row.get('id'))
-        moyennes = {t: calcul_moyenne(df_eleve[df_eleve['Trimestre'] == t]) for t in ['1', '2', '3']}
-        moy_globale = calcul_moyenne(df_eleve)
+# ---------------- ChartGenerator ----------------
+class ChartGenerator:
+    @staticmethod
+    def create_overview_metrics(stats):
         col1, col2, col3, col4 = st.columns(4)
-        col1.markdown(f"**T1 :** <span style='color:{couleur_moyenne(moyennes['1'])}'>{(moyennes['1'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col2.markdown(f"**T2 :** <span style='color:{couleur_moyenne(moyennes['2'])}'>{(moyennes['2'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col3.markdown(f"**T3 :** <span style='color:{couleur_moyenne(moyennes['3'])}'>{(moyennes['3'] or 0):.2f}</span>", unsafe_allow_html=True)
-        col4.markdown(f"**Générale :** <span style='color:{couleur_moyenne(moy_globale)}'>{(moy_globale or 0):.2f}</span>", unsafe_allow_html=True)
-        # Bouton export spécifique à l'élève affiché
-        try:
-            csv_eleve = dataframe_to_csv_bytes(df_eleve)
-            st.download_button(f"📤 Exporter les notes de {eleve_choisi} (CSV)", data=csv_eleve, file_name=f"notes_{eleve_choisi}.csv", mime="text/csv")
-        except Exception:
-            pass
-    else:
-        st.info("Aucune note trouvée pour cet élève.")
+        with col1:
+            st.metric("👥 Élèves", value=stats.get('nb_eleves', 0))
+        with col2:
+            st.metric("📝 Notes", value=stats.get('nb_notes', 0))
+        with col3:
+            moyenne = stats.get('moyenne_generale', 0) or 0
+            st.metric("📊 Moyenne", value=f"{moyenne:.2f}/20")
+        with col4:
+            taux = stats.get('taux_reussite', 0) or 0
+            st.metric("✅ Réussite", value=f"{taux:.1f}%")
 
-with tab2:
-    st.subheader(f"Statistiques par matière — {eleve_choisi if eleve_choisi else '—'}")
-    if not df_eleve.empty:
-        stats = df_eleve.groupby('Matiere').apply(
-            lambda g: pd.Series({
-                'Moyenne': calcul_moyenne(g),
-                'Nb Notes': len(g),
-                'Total Coef': g['Coefficient'].sum()
-            })
-        ).reset_index()
-        # Formater moyennes (2 décimales) et afficher
-        stats['Moyenne'] = stats['Moyenne'].apply(lambda x: float(f"{(x or 0):.2f}") if pd.notna(x) else None)
-        st.dataframe(stats)
-    else:
-        st.info("Pas encore de notes pour cet élève.")
+    @staticmethod
+    def create_evolution_chart(df):
+        if df.empty:
+            return None
+        df_copy = df.copy()
+        df_copy['Note'] = pd.to_numeric(df_copy['Note'], errors='coerce')
+        df_copy['Date'] = pd.to_datetime(df_copy['Date'], errors='coerce')
+        df_copy = df_copy.dropna(subset=['Note','Date'])
+        if df_copy.empty:
+            return None
+        df_copy['Mois'] = df_copy['Date'].dt.to_period('M')
+        monthly_avg = df_copy.groupby('Mois')['Note'].mean().reset_index()
+        monthly_avg['Mois'] = monthly_avg['Mois'].astype(str)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=monthly_avg['Mois'], y=monthly_avg['Note'],
+                                 mode='lines+markers', name='Moyenne mensuelle'))
+        fig.update_layout(title='📈 Évolution des Moyennes Mensuelles', xaxis_title='Mois', yaxis=dict(range=[0,20]))
+        return fig
 
-with tab3:
-    st.subheader(f"Graphiques — {eleve_choisi if eleve_choisi else '—'}")
-    if not df_eleve.empty:
-        # Graphique ligne (moyenne par trimestre)
-        moy_trimestres_df = pd.DataFrame({
-            "Trimestre": ['1', '2', '3'],
-            "Moyenne": [calcul_moyenne(df_eleve[df_eleve['Trimestre'] == t]) or 0 for t in ['1', '2', '3']]
-        })
-        line_chart = alt.Chart(moy_trimestres_df).mark_line(point=True).encode(
-            x=alt.X("Trimestre:N", title="Trimestre"),
-            y=alt.Y("Moyenne:Q", scale=alt.Scale(domain=[0, 20]), title="Moyenne")
-        ).properties(title="Évolution des moyennes trimestrielles")
-        st.altair_chart(line_chart, use_container_width=True)
+    @staticmethod
+    def create_grade_distribution(df):
+        if df.empty:
+            return None
+        df_copy = df.copy()
+        df_copy['Note'] = pd.to_numeric(df_copy['Note'], errors='coerce').dropna()
+        if df_copy.empty:
+            return None
+        fig = px.histogram(df_copy, x='Note', nbins=20, title='📊 Distribution des Notes')
+        fig.update_layout(yaxis_title='Nombre')
+        return fig
 
-        # Moyenne par matière (bar chart)
-        # calculer moyennes par matière en utilisant la fonction existante
-        moys = []
-        for m in df_eleve['Matiere'].dropna().unique():
-            m_df = df_eleve[df_eleve['Matiere'] == m]
-            moys.append({"Matiere": m, "Moyenne": calcul_moyenne(m_df) or 0})
-        moy_matiere = pd.DataFrame(moys)
-        if not moy_matiere.empty:
-            bar_chart = alt.Chart(moy_matiere).mark_bar().encode(
-                x=alt.X("Matiere:N", sort=None, title="Matière"),
-                y=alt.Y("Moyenne:Q", scale=alt.Scale(domain=[0, 20]), title="Moyenne"),
-                tooltip=["Matiere", alt.Tooltip("Moyenne", format=".2f")]
-            ).properties(title="Moyenne par matière")
-            st.altair_chart(bar_chart, use_container_width=True)
+# ---------------- Helpers ----------------
+def apply_filters(df, selected_class, selected_trimestre):
+    df_filtered = df.copy()
+    if selected_class and selected_class != "Toutes":
+        df_filtered = df_filtered[df_filtered['Classe'] == selected_class]
+    if selected_trimestre and selected_trimestre != "Tous":
+        df_filtered = df_filtered[df_filtered['Trimestre'] == selected_trimestre]
+    return df_filtered
 
-        # Répartition des coefficients par matière (pie chart)
-        coef_matiere = df_eleve.groupby('Matiere')['Coefficient'].sum().reset_index()
-        coef_matiere = coef_matiere[coef_matiere['Coefficient'] > 0]  # ignorer coef nuls ou négatifs s'il y en a
-        if len(coef_matiere) > 0:
-            pie = alt.Chart(coef_matiere).mark_arc().encode(
-                theta=alt.Theta(field="Coefficient", type="quantitative"),
-                color=alt.Color("Matiere:N", legend=alt.Legend(title="Matière")),
-                tooltip=[alt.Tooltip("Matiere:N"), alt.Tooltip("Coefficient:Q", format=".2f")]
-            ).properties(title="Répartition des coefficients par matière")
-            st.altair_chart(pie, use_container_width=True)
+def create_sample_data():
+    sample_data = []
+    students = ["Alice Martin", "Bob Dupont", "Claire Bernard", "David Moreau", "Emma Leroy"]
+    subjects = ["Mathématiques", "Français", "Histoire", "Sciences", "Anglais"]
+    classes = ["6A", "6B", "5A"]
+    for student in students:
+        classe = np.random.choice(classes)
+        for subject in subjects:
+            for trimestre in ["1","2","3"]:
+                for _ in range(np.random.randint(2,5)):
+                    note = np.random.normal(12, 3)
+                    note = max(0, min(20, note))
+                    sample_data.append({
+                        "id": str(uuid.uuid4()),
+                        "Eleve": student,
+                        "Classe": classe,
+                        "Matiere": subject,
+                        "Note": round(note,2),
+                        "Coefficient": int(np.random.choice([1,1,1,2,2,3])),
+                        "Trimestre": trimestre,
+                        "Date": (datetime.now() - timedelta(days=np.random.randint(0,365))).strftime("%Y-%m-%d"),
+                        "Commentaire": ""
+                    })
+    return pd.DataFrame(sample_data)
+
+# ---------------- Vues principales ----------------
+def show_dashboard(df):
+    st.markdown("### 📊 Vue d'Ensemble")
+    stats = DataManager.calculate_statistics(df)
+    ChartGenerator.create_overview_metrics(stats)
+
+    # --- Cards HTML (meilleure / plus faible matière) ---
+    best = "—"
+    worst = "—"
+    if stats.get('moyenne_par_matiere'):
+        mpm = stats['moyenne_par_matiere']
+        if len(mpm) > 0:
+            sorted_items = sorted(mpm.items(), key=lambda x: x[1], reverse=True)
+            best = f"{sorted_items[0][0]} ({sorted_items[0][1]:.2f})"
+            worst = f"{sorted_items[-1][0]} ({sorted_items[-1][1]:.2f})"
+    extra_html = f"""
+    <div style="display:flex; gap:16px; margin-top:20px;">
+      <div style="flex:1; background:white; padding:16px; border-radius:8px; 
+                  box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <h3 style="margin:0;">🔥 Meilleure matière</h3>
+        <p style="font-size:18px; color:#16a34a; margin-top:8px;">{best}</p>
+      </div>
+      <div style="flex:1; background:white; padding:16px; border-radius:8px; 
+                  box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+        <h3 style="margin:0;">⚠️ Matière la plus faible</h3>
+        <p style="font-size:18px; color:#dc2626; margin-top:8px;">{worst}</p>
+      </div>
+    </div>
+    """
+    st.markdown(extra_html, unsafe_allow_html=True)
+
+    # --- Graphiques ---
+    col1, col2 = st.columns(2)
+    with col1:
+        fig_evol = ChartGenerator.create_evolution_chart(df)
+        if fig_evol:
+            st.plotly_chart(fig_evol, use_container_width=True)
         else:
-            st.info("Pas de coefficients valides pour construire un camembert.")
+            st.info("Données insuffisantes pour l'évolution")
+    with col2:
+        fig_dist = ChartGenerator.create_grade_distribution(df)
+        if fig_dist:
+            st.plotly_chart(fig_dist, use_container_width=True)
+        else:
+            st.info("Aucune distribution disponible")
+
+    st.markdown("### 📝 Dernières Notes")
+    if not df.empty:
+        df_recent = df.copy()
+        df_recent['Date'] = pd.to_datetime(df_recent['Date'], errors='coerce')
+        df_recent = df_recent.dropna(subset=['Date']).sort_values('Date', ascending=False).head(10)
+        df_display = df_recent[['Eleve','Matiere','Note','Coefficient','Trimestre','Classe','Date']].copy()
+        df_display['Date'] = df_display['Date'].dt.strftime('%d/%m/%Y')
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
-        st.info("Pas encore de notes pour cet élève.")
+        st.info("Aucune note enregistrée")
+
+# ---------------- Admin view ----------------
+def show_admin(df):
+    admin_html = """
+    <div style="background:#f1f5f9; padding:16px; border-radius:8px; margin-bottom:16px;">
+      <h2 style="margin:0; color:#0f172a;">⚙️ Administration</h2>
+      <p style="margin:0; font-size:14px; opacity:0.8;">Exporter, importer ou réinitialiser les données</p>
+    </div>
+    """
+    st.markdown(admin_html, unsafe_allow_html=True)
+
+    export_format = st.selectbox("Format d'export", ["CSV","Excel","JSON"])
+    if st.button("📤 Exporter"):
+        export_data(df, export_format)
+    st.markdown("---")
+    st.markdown("### Import / Test")
+    uploaded = st.file_uploader("Charger un CSV (colonnes attendues : Eleve,Classe,Matiere,Note,Coefficient,Trimestre,Date,Commentaire)", type=["csv"])
+    if uploaded is not None:
+        try:
+            new_df = pd.read_csv(uploaded)
+            # essayer d'ajouter IDs et colonnes manquantes
+            for col in EXPECTED_COLS:
+                if col not in new_df.columns:
+                    new_df[col] = "" if col == "Commentaire" else None
+            new_df = new_df.reindex(columns=EXPECTED_COLS)
+            if DataManager.save_data(new_df):
+                st.success("Nouveau dataset sauvegardé")
+                time.sleep(1)
+                st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Erreur import : {e}")
+
+    if st.button("Charger des données d'exemple"):
+        sample_df = create_sample_data()
+        if DataManager.save_data(sample_df):
+            st.success("Données d'exemple ajoutées")
+            time.sleep(1)
+            st.experimental_rerun()
+
+# ---------------- Administration export simple ----------------
+def export_data(df, format_type="CSV"):
+    if df.empty:
+        st.warning("Aucune donnée à exporter")
+        return
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    try:
+        if format_type == "CSV":
+            csv_data = df.to_csv(index=False)
+            st.download_button("💾 Télécharger CSV", csv_data, file_name=f"gradetrack_export_{timestamp}.csv", mime="text/csv")
+        elif format_type == "Excel":
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Notes')
+            st.download_button("💾 Télécharger Excel", buffer.getvalue(), file_name=f"gradetrack_export_{timestamp}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        elif format_type == "JSON":
+            json_data = df.to_json(orient='records', indent=2)
+            st.download_button("💾 Télécharger JSON", json_data, file_name=f"gradetrack_export_{timestamp}.json", mime="application/json")
+        st.success(f"✅ Export {format_type} prêt")
+    except Exception as e:
+        st.error(f"Erreur export: {e}")
+
+# ---------------- Main ----------------
+def main():
+    df = DataManager.load_data()
+    with st.sidebar:
+        st.markdown("## 🎮 Panneau de Contrôle")
+        view_mode = st.selectbox("Mode d'affichage", ["📊 Dashboard", "⚙️ Administration"], index=0)
+        st.markdown("---")
+        classes = ["Toutes"] + sorted([c for c in df['Classe'].unique() if pd.notna(c) and c != ""]) if not df.empty else ["Toutes"]
+        selected_class = st.selectbox("Classe", classes)
+        selected_trimestre = st.selectbox("Trimestre", ["Tous","1","2","3"])
+        if st.button("🔄 Actualiser"):
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.experimental_rerun()
+
+    # >>> HEADER HTML <<<
+    header_html = """
+    <div style="background: linear-gradient(90deg,#0f172a,#2563eb); 
+                padding:24px; border-radius:12px; color:white; margin-bottom:20px;">
+      <h1 style="margin:0; font-family: 'Segoe UI', Tahoma, sans-serif;">📊 GradeTrack</h1>
+      <p style="margin:4px 0 0 0; opacity:0.9;">Suivi visuel des notes et performances scolaires</p>
+    </div>
+    """
+    st.markdown(header_html, unsafe_allow_html=True)
+
+    df_filtered = apply_filters(df, selected_class, selected_trimestre)
+    if view_mode == "📊 Dashboard":
+        show_dashboard(df_filtered)
+    elif view_mode == "⚙️ Administration":
+        show_admin(df)
+
+    # >>> FOOTER HTML <<<
+    st.markdown("""
+    <hr>
+    <div style="text-align:center; font-size:13px; color:gray; margin-top:20px;">
+      Développé avec ❤️ par Winson — GradeTrack © 2025
+    </div>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
