@@ -332,7 +332,7 @@ def main():
     st.markdown("""
     <hr>
     <div style="text-align:center; font-size:13px; color:gray; margin-top:20px;">
-      Développé avec ❤️ par Winson — GradeTrack © 2025
+      Développé par Winson — GradeTrack © 2025
     </div>
     """, unsafe_allow_html=True)
 
