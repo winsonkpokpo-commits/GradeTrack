@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # UI constants
 VIEW_DASHBOARD = "📊 Dashboard"
+VIEW_ANALYTICS = "📈 Analytics"
 VIEW_STUDENT_DETAIL = "👤 Détail Élève"
 VIEW_ADD_DATA = "➕ Ajouter des Données"
 VIEW_ADMIN = "⚙️ Administration"
@@ -25,13 +26,17 @@ CLASS_ALL = "Toutes"
 TRIMESTER_ALL = "Tous"
 STUDENT_ALL = "Tous"
 
-@st.cache_data(show_spinner=False)
-def load_data_cached(_data_manager: DataManager) -> pd.DataFrame:
-    """Load data and cache result to avoid reloading on every interaction.
+def load_data_cached(data_manager: DataManager) -> pd.DataFrame:
+    """Wrapper around a module-level cached loader so Streamlit can key the cache.
 
-    The parameter is prefixed with an underscore so Streamlit skips hashing the
-    DataManager itself and uses the provided value for cache keying safely.
+    The leading-underscore parameter on the cached function ensures Streamlit
+    skips hashing the DataManager object itself.
     """
+    return _cached_loader(data_manager)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_loader(_data_manager: DataManager) -> pd.DataFrame:
     return _data_manager.load_data()
 
 @st.cache_data(show_spinner=False)
@@ -101,12 +106,154 @@ def show_quick_stats(df: pd.DataFrame):
     if not np.isnan(avg_grade):
         st.metric("📊 Moyenne", f"{avg_grade:.2f}/20")
 
+def show_subject_averages(df: pd.DataFrame):
+    """Group by Matiere and show bar chart + table of average Note per subject."""
+    if df is None or df.empty or 'Matiere' not in df.columns or 'Note' not in df.columns:
+        st.info("Données insuffisantes pour afficher les moyennes par matière.")
+        return
+
+    df_valid = df.dropna(subset=['Note'])
+    df_valid = df_valid[df_valid['Matiere'] != '']
+    if df_valid.empty:
+        st.info("Données insuffisantes pour afficher les moyennes par matière.")
+        return
+
+    subj = df_valid.groupby('Matiere', dropna=True)['Note'].mean().round(2).sort_values(ascending=False)
+    subj_df = subj.reset_index().rename(columns={'Matiere': 'Matière', 'Note': 'Moyenne /20'})
+
+    left, right = st.columns([1, 1])
+    with left:
+        st.bar_chart(subj)
+    with right:
+        st.dataframe(subj_df, hide_index=True)
+
+def show_class_ranking(df: pd.DataFrame, selected_class: str):
+    """Show ranking of students within a class or ranking of classes overall."""
+    if df is None or df.empty or 'Note' not in df.columns:
+        st.info("Données insuffisantes pour établir le classement.")
+        return
+
+    df_valid = df.dropna(subset=['Note'])
+    df_valid = df_valid[df_valid['Note'].astype(str) != '']
+    if df_valid.empty:
+        st.info("Données insuffisantes pour établir le classement.")
+        return
+
+    if selected_class and selected_class != CLASS_ALL and 'Classe' in df_valid.columns:
+        # Rank students within the selected class
+        df_sel = df_valid[df_valid['Classe'] == selected_class]
+        if df_sel.empty or 'Eleve' not in df_sel.columns:
+            st.info("Pas assez de données pour ce classement de classe sélectionnée.")
+            return
+        ranked = df_sel.groupby('Eleve', dropna=True)['Note'].mean().round(2).sort_values(ascending=False).reset_index()
+        ranked.insert(0, 'Rang', range(1, len(ranked) + 1))
+        ranked = ranked.rename(columns={'Eleve': 'Élève', 'Note': 'Moyenne /20'})
+        st.dataframe(ranked, hide_index=True)
+    else:
+        # Rank classes overall
+        if 'Classe' not in df_valid.columns:
+            st.info("Pas assez de données pour établir le classement des classes.")
+            return
+        ranked = df_valid.groupby('Classe', dropna=True)['Note'].mean().round(2).sort_values(ascending=False).reset_index()
+        ranked.insert(0, 'Rang', range(1, len(ranked) + 1))
+        ranked = ranked.rename(columns={'Classe': 'Classe', 'Note': 'Moyenne /20'})
+        st.dataframe(ranked, hide_index=True)
+
+def show_trimester_trend(df: pd.DataFrame):
+    """Show trend of mean Note per Trimestre (optionally per Classe)."""
+    if df is None or df.empty or 'Trimestre' not in df.columns or 'Note' not in df.columns:
+        st.info("Données insuffisantes pour afficher la tendance par trimestre.")
+        return
+
+    df_valid = df.dropna(subset=['Note'])
+    if df_valid.empty:
+        st.info("Données insuffisantes pour afficher la tendance par trimestre.")
+        return
+
+    # Compute mean note by Trimestre and Classe
+    group = df_valid.groupby(['Trimestre', 'Classe'], dropna=True)['Note'].mean()
+    # If multiple classes present, unstack to get columns per class
+    try:
+        trend = group.unstack('Classe')
+    except Exception:
+        trend = group.unstack('Classe')
+
+    # Ensure Trimestre sorted by natural order if numeric-like
+    try:
+        trend = trend.reindex(sorted(trend.index, key=lambda x: int(x)))
+    except Exception:
+        trend = trend.sort_index()
+
+    st.line_chart(trend)
+    st.caption("Ce graphique ignore intentionnellement le filtre 'Trimestre' de la sidebar; "
+               "il montre la tendance complète par trimestre (passez TRIMESTER_ALL pour voir la série complète).")
+
+def show_export_options(df: pd.DataFrame):
+    """Provide CSV download and attempt a simple PDF summary using fpdf2."""
+    left, right = st.columns([1, 1])
+    csv_bytes = (df.to_csv(index=False).encode('utf-8-sig') if df is not None else b'')
+    with left:
+        st.download_button("Télécharger CSV", data=csv_bytes, file_name="gradetrack_export.csv", mime="text/csv")
+
+    with right:
+        try:
+            from fpdf import FPDF
+
+            # Build a simple ASCII-only PDF summary (Helvetica)
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Helvetica", size=12)
+            total_students = int(df['Eleve'].nunique()) if df is not None and 'Eleve' in df.columns else 0
+            total_grades = int(len(df.dropna(subset=['Note']))) if df is not None and 'Note' in df.columns else 0
+            overall_avg = float(df['Note'].mean()) if df is not None and 'Note' in df.columns and not df['Note'].dropna().empty else 0.0
+
+            pdf.cell(0, 8, txt=f"GradeTrack Summary", ln=1)
+            pdf.cell(0, 8, txt=f"Total unique students: {total_students}", ln=1)
+            pdf.cell(0, 8, txt=f"Total grades: {total_grades}", ln=1)
+            pdf.cell(0, 8, txt=f"Overall average: {overall_avg:.2f}/20", ln=1)
+            pdf.ln(4)
+
+            # Averages per subject (ASCII only)
+            if df is not None and 'Matiere' in df.columns and 'Note' in df.columns:
+                subj = df.dropna(subset=['Note'])
+                subj = subj[subj['Matiere'] != '']
+                if not subj.empty:
+                    subj_avg = subj.groupby('Matiere', dropna=True)['Note'].mean().round(2)
+                    pdf.cell(0, 8, txt="Average per subject:", ln=1)
+                    for mat, val in subj_avg.items():
+                        # Ensure plain ASCII: replace accented chars with plain approximations
+                        mat_ascii = (str(mat)
+                                     .replace('é', 'e')
+                                     .replace('è', 'e')
+                                     .replace('ê', 'e')
+                                     .replace('à', 'a')
+                                     .replace('ù', 'u')
+                                     .replace('ô', 'o')
+                                     .replace('î', 'i'))
+                        pdf.cell(0, 7, txt=f"- {mat_ascii}: {val:.2f}/20", ln=1)
+
+            pdf_bytes = pdf.output(dest='S').encode('latin-1', errors='ignore')
+            st.download_button("Télécharger PDF", data=pdf_bytes, file_name="gradetrack_summary.pdf", mime="application/pdf")
+        except ImportError:
+            st.caption("Export PDF indisponible : installez `fpdf2` (`pip install fpdf2`).")
+
+def show_analytics(df_filtered: pd.DataFrame, df_trend: pd.DataFrame, selected_class: str):
+    """Wrapper that displays all analytics sections in order."""
+    st.header("📈 Analytics")
+    show_subject_averages(df_filtered)
+    st.markdown("---")
+    show_class_ranking(df_filtered, selected_class)
+    st.markdown("---")
+    show_trimester_trend(df_trend)
+    st.markdown("---")
+    show_export_options(df_filtered)
+
 def create_sidebar(df: pd.DataFrame) -> Tuple[str, str, str, Optional[str]]:
     """Crée la sidebar avec les contrôles et retourne l'état sélectionné."""
     with st.sidebar:
         st.markdown("## 🎮 Panneau de Contrôle")
 
-        view_options = [VIEW_DASHBOARD, VIEW_STUDENT_DETAIL, VIEW_ADD_DATA, VIEW_ADMIN]
+        view_options = [VIEW_DASHBOARD, VIEW_ANALYTICS, VIEW_STUDENT_DETAIL, VIEW_ADD_DATA, VIEW_ADMIN]
         view_mode = st.selectbox("Mode d'affichage", view_options, index=0)
 
         st.markdown("---")
@@ -173,6 +320,10 @@ def main():
 
         if view_mode == VIEW_DASHBOARD:
             Views.show_dashboard(df_filtered)
+        elif view_mode == VIEW_ANALYTICS:
+            # For trends we want the full trimester series, so pass TRIMESTER_ALL to the trend DF.
+            df_trend = apply_filters(df, selected_class, TRIMESTER_ALL, None)
+            show_analytics(df_filtered, df_trend, selected_class)
         elif view_mode == VIEW_STUDENT_DETAIL:
             if selected_student and selected_student != STUDENT_ALL:
                 Views.show_student_detail(df_filtered, selected_student)
