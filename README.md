@@ -4,7 +4,7 @@
 
 GradeTrack is a web application designed to simplify the **management, exploration, and visualization of students' academic results**.
 
-The project currently focuses on building a reliable foundation for academic data management: loading and validating grade data, filtering results, monitoring class performance, and exploring individual student records through an interactive dashboard.
+The project currently focuses on building a reliable foundation for academic data management: loading and validating grade data, filtering results, monitoring class performance, and exploring individu[...]
 
 Machine Learning and AI capabilities are **future development goals** and are not part of the current version.
 
@@ -438,9 +438,7 @@ Then open a Pull Request.
 
 # 📄 License
 
-This project is distributed under the **MIT License**.
-
-See [`LICENSE`](LICENSE) for more information.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
@@ -455,4 +453,3 @@ GitHub: [@winsonkpokpo-commits](https://github.com/winsonkpokpo-commits/GradeTra
 > **GradeTrack starts with a simple question: how can academic data be managed and understood more effectively?**
 >
 > The long-term goal is to explore how data analysis and machine learning can eventually transform that data into meaningful educational insights.
-
