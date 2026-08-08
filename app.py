@@ -25,12 +25,14 @@ CLASS_ALL = "Toutes"
 TRIMESTER_ALL = "Tous"
 STUDENT_ALL = "Tous"
 
-def load_data_cached(data_manager: DataManager) -> pd.DataFrame:
-    """Load data and cache result to avoid reloading on every interaction."""
-    @st.cache_data(show_spinner=False)
-    def _cached_loader():
-        return data_manager.load_data()
-    return _cached_loader()
+@st.cache_data(show_spinner=False)
+def load_data_cached(_data_manager: DataManager) -> pd.DataFrame:
+    """Load data and cache result to avoid reloading on every interaction.
+
+    The parameter is prefixed with an underscore so Streamlit skips hashing the
+    DataManager itself and uses the provided value for cache keying safely.
+    """
+    return _data_manager.load_data()
 
 @st.cache_data(show_spinner=False)
 def unique_classes_from(df: pd.DataFrame) -> list:
@@ -126,7 +128,7 @@ def create_sidebar(df: pd.DataFrame) -> Tuple[str, str, str, Optional[str]]:
         if st.button("🔄 Actualiser", use_container_width=True):
             # Clear streamlit cache and reload
             st.cache_data.clear()
-            st.experimental_rerun()
+            st.rerun()
 
         return view_mode, selected_class, selected_trimestre, selected_student
 
@@ -184,6 +186,9 @@ def main():
         create_footer()
 
     except Exception as exc:  # Top-level catch to display friendly message & log
+        # Log the string form of the exception explicitly for easier local debugging,
+        # then log the exception with traceback.
+        logger.error("Erreur: %s", str(exc))
         logger.exception("Erreur inattendue dans l'application GradeTrack")
         st.error("Une erreur inattendue est survenue. Consultez les logs pour plus de détails.")
 
