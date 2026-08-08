@@ -1,109 +1,458 @@
-# GradeTrack
+# 📊 GradeTrack
 
-A simple Streamlit app to track student grades and classroom performance.
+> **A student academic performance tracking and visualization application built with Python and Streamlit.**
 
-This repository provides a lightweight grading dashboard that allows teachers and administrators to view class averages, per-student details, import new grade data, and manage application settings.
+GradeTrack is a web application designed to simplify the **management, exploration, and visualization of students' academic results**.
 
-> Note: Most of the UI and labels are in French — this README is in English with some French notes.
+The project currently focuses on building a reliable foundation for academic data management: loading and validating grade data, filtering results, monitoring class performance, and exploring individual student records through an interactive dashboard.
 
-## Features
+Machine Learning and AI capabilities are **future development goals** and are not part of the current version.
 
-- Dashboard with class and trimester filters (📊 Dashboard)
-- Per-student detail view (👤 Détail Élève)
-- Add/import grade data (➕ Ajouter des Données)
-- Administration panel (⚙️ Administration)
-- Streamlit caching for faster interactions
-- Resilient handling of empty or malformed data
+---
 
-## Requirements
+## 🎯 Project Overview
 
-- Python 3.9+ recommended
-- streamlit
-- pandas
-- numpy
+Managing academic results can quickly become repetitive when information is spread across spreadsheets or manually processed.
 
-You can install the main dependencies with pip:
+GradeTrack aims to provide a centralized interface where academic data can be explored more easily.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # or .\.venv\Scripts\activate on Windows
-pip install streamlit pandas numpy
+The current application allows users to:
+
+* explore academic results;
+* filter results by class and trimester;
+* inspect individual students;
+* view basic performance statistics;
+* add or import academic data;
+* access administrative functionality;
+* work with imperfect or incomplete datasets more safely.
+
+The project is currently focused on **software engineering, data management, and academic visualization**.
+
+---
+
+## ✨ Current Features
+
+### 📊 Interactive Dashboard
+
+The dashboard provides an overview of the available academic data.
+
+Current statistics include:
+
+* Number of students
+* Number of recorded grades
+* Overall average grade
+
+The displayed data can be filtered interactively.
+
+### 🏫 Class Filtering
+
+Users can select a specific class or view all classes.
+
+```text
+Toutes
+Terminale D
+Terminale C
+...
 ```
 
-If the repository grows a `requirements.txt`, prefer:
+### 📅 Trimester Filtering
 
-```bash
-pip install -r requirements.txt
+Academic results can be filtered by trimester:
+
+* All trimesters
+* Trimester 1
+* Trimester 2
+* Trimester 3
+
+### 👤 Student Details
+
+GradeTrack provides a dedicated student view.
+
+Users can select an individual student and inspect the academic data associated with that student.
+
+### ➕ Data Management
+
+The application includes an interface for adding or importing academic data.
+
+The data-management layer is designed to deal with incomplete or malformed records without unnecessarily breaking the application.
+
+### ⚙️ Administration
+
+An administration section is available for application-level management operations.
+
+### 🔄 Data Refresh
+
+The application provides a refresh mechanism that clears Streamlit's cached data and reloads the dataset.
+
+### 🛡️ Defensive Data Handling
+
+GradeTrack performs several validation and cleaning operations before displaying academic data.
+
+For example:
+
+* missing grades are excluded from performance calculations;
+* empty subjects are ignored;
+* missing class/student values are handled;
+* empty datasets are detected;
+* unexpected application errors are logged and handled gracefully.
+
+---
+
+# 🧮 Data Model
+
+GradeTrack currently works with structured academic data organized around several core concepts:
+
+| Field       | Description   |
+| ----------- | ------------- |
+| `Eleve`     | Student       |
+| `Classe`    | Class         |
+| `Matiere`   | Subject       |
+| `Note`      | Grade         |
+| `Trimestre` | Academic term |
+
+A simplified example:
+
+```csv
+Eleve,Classe,Matiere,Note,Trimestre
+Alice,Terminale D,Mathématiques,15.5,1
+Bob,Terminale D,Physique,12.0,1
+Alice,Terminale D,SVT,17.0,1
 ```
 
-## Quick start (development)
+The application processes this data with **Pandas** before presenting it through the Streamlit interface.
 
-1. Clone the repository:
+---
+
+# 🏗️ Project Architecture
+
+The current version follows a modular architecture rather than putting the entire application in a single file.
+
+```text
+GradeTrack/
+│
+├── app.py
+├── config.py
+├── data_manager.py
+├── views.py
+├── admin.py
+│
+├── README.md
+├── LICENSE
+├── PULL_REQUEST_TEMPLATE.md
+│
+└── .devcontainer/
+```
+
+### `app.py`
+
+The main application entry point.
+
+It is responsible for:
+
+* initializing Streamlit;
+* loading the data;
+* managing application navigation;
+* applying filters;
+* connecting the different modules;
+* handling application-level errors.
+
+### `data_manager.py`
+
+Responsible for academic data loading, processing, and data-management operations.
+
+### `views.py`
+
+Contains the user-facing application views, including the dashboard, student details, and data-related interfaces.
+
+### `admin.py`
+
+Contains administration-related functionality.
+
+### `config.py`
+
+Centralizes application configuration such as:
+
+* application name;
+* application icon;
+* description;
+* developer information;
+* Streamlit page configuration.
+
+---
+
+# 🛠️ Technology Stack
+
+## Current
+
+* **Python**
+* **Streamlit**
+* **Pandas**
+* **NumPy**
+
+## Development principles
+
+The project currently emphasizes:
+
+* modular Python code;
+* separation of responsibilities;
+* structured data processing;
+* defensive programming;
+* reusable functions;
+* Streamlit caching;
+* basic logging and error handling.
+
+---
+
+# 📈 Project Roadmap
+
+GradeTrack is being developed progressively.
+
+The objective is to first build a solid academic data platform before introducing more advanced analytical and machine-learning capabilities.
+
+## Phase 1 — Academic Data Management
+
+**Current phase**
+
+* [x] Load academic data
+* [x] Filter academic records
+* [x] Filter by class
+* [x] Filter by trimester
+* [x] Filter by student
+* [x] Display basic statistics
+* [x] Student detail view
+* [x] Data management interface
+* [x] Administration interface
+* [x] Basic data validation
+* [x] Error handling
+* [x] Modular application structure
+
+---
+
+## Phase 2 — Academic Analytics
+
+**Planned**
+
+The next stage will focus on extracting more meaningful information from academic results.
+
+Potential features include:
+
+* [ ] Weighted averages
+* [ ] Subject-level performance analysis
+* [ ] Performance evolution across trimesters
+* [ ] Identification of academic strengths and weaknesses
+* [ ] Class performance analysis
+* [ ] More advanced visualizations
+* [ ] Academic reports
+* [ ] Improved data validation
+
+---
+
+## Phase 3 — Machine Learning
+
+**Future**
+
+Once the analytical foundation is sufficiently mature, GradeTrack may incorporate Machine Learning.
+
+Possible applications include:
+
+* [ ] Feature engineering from academic history
+* [ ] Performance prediction
+* [ ] Performance trend prediction
+* [ ] Identification of declining performance
+* [ ] Academic risk classification
+* [ ] Model evaluation and comparison
+
+These features are **not implemented in the current version**.
+
+---
+
+## Phase 4 — Intelligent Educational Features
+
+**Long-term direction**
+
+A future version could explore AI-assisted academic analysis.
+
+Possible directions include:
+
+* [ ] Natural-language explanations of academic trends
+* [ ] Personalized learning recommendations
+* [ ] Automated academic reports
+* [ ] Conversational academic assistant
+
+These are research and development objectives rather than current GradeTrack features.
+
+---
+
+# 🧠 Development Philosophy
+
+GradeTrack is intentionally being developed incrementally.
+
+The project follows a progression from fundamental software engineering toward more advanced AI systems:
+
+```text
+Software Engineering
+        ↓
+Data Management
+        ↓
+Data Analysis
+        ↓
+Machine Learning
+        ↓
+Artificial Intelligence
+```
+
+The principle is simple:
+
+> **Build the data foundation first, understand the problem second, and introduce AI only when it provides a meaningful solution.**
+
+This approach is intended to prevent the project from becoming an AI layer placed on top of poorly structured data.
+
+---
+
+# 🔐 Data & Privacy
+
+Academic records can contain sensitive personal information.
+
+Any future deployment using real student data should take into consideration:
+
+* data anonymization;
+* access control;
+* secure storage;
+* appropriate data retention;
+* responsible use of student information.
+
+The examples used for development should preferably contain fictional or anonymized data.
+
+---
+
+# 💻 Installation
+
+## 1. Clone the repository
 
 ```bash
 git clone https://github.com/winsonkpokpo-commits/GradeTrack.git
 cd GradeTrack
 ```
 
-2. Install dependencies (see Requirements above).
+## 2. Create a virtual environment
 
-3. Run the app locally with Streamlit:
+### Windows
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+### Linux / macOS
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+## 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+## 4. Run GradeTrack
 
 ```bash
 streamlit run app.py
 ```
 
-4. The app opens in your browser (usually http://localhost:8501).
+The application will open in your browser through the local Streamlit server.
 
-## Data format
+---
 
-The app expects a tabular dataset (CSV, Excel, etc.) with at least the following columns (French column names used in the code):
+# 📌 Project Status
 
-- Eleve — student name or identifier
-- Classe — class/group name
-- Matiere — subject name
-- Note — numeric grade (e.g., on a 20-point scale)
-- Trimestre — trimester/term (e.g., `1`, `2`, `3`)
+**Status: Active Development**
 
-Example CSV header:
+GradeTrack is currently a functional academic data management and visualization application.
 
+The current priority is to strengthen the application's:
+
+* architecture;
+* data processing;
+* academic analytics;
+* testing;
+* documentation.
+
+Machine Learning and AI features will be developed in later stages once the underlying academic analytics are sufficiently mature.
+
+---
+
+# 🗺️ Roadmap at a Glance
+
+```text
+┌─────────────────────────────┐
+│  Phase 1                    │
+│  Academic Data Management   │
+│  ✅ CURRENT                 │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Phase 2                    │
+│  Academic Analytics         │
+│  🔜 NEXT                    │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Phase 3                    │
+│  Machine Learning           │
+│  🔬 FUTURE                  │
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│  Phase 4                    │
+│  Intelligent Features       │
+│  🚀 LONG TERM               │
+└─────────────────────────────┘
 ```
-Eleve,Classe,Matiere,Note,Trimestre
-Dupont Alice,6A,Math,15.5,1
-Martin Bob,6A,Français,12.0,1
+
+---
+
+# 🤝 Contributing
+
+Contributions, suggestions, and feedback are welcome.
+
+For significant changes, consider opening an issue before submitting a pull request.
+
+A typical development workflow is:
+
+```bash
+git checkout -b feat/my-feature
+git add .
+git commit -m "feat: describe the change"
+git push origin feat/my-feature
 ```
 
-If your data uses different column names, update the data loading logic in `data_manager.py` or add a preprocessing step to normalize column names to the ones above.
+Then open a Pull Request.
 
-## Configuration
+---
 
-Application-level settings are read from `config.py` (app title, icons, page config, developer contact, year, etc.). Edit that file to customize the name and appearance of the app.
+# 📄 License
 
-## Project structure (high level)
+This project is distributed under the **MIT License**.
 
-- `app.py` — main Streamlit app and UI wiring
-- `data_manager.py` — data loading/saving utilities
-- `views.py` — UI components and view handlers (dashboard, add data, student detail)
-- `admin.py` — administration panel
-- `config.py` — application configuration/constants
+See [`LICENSE`](LICENSE) for more information.
 
-## Contributing
+---
 
-Contributions are welcome. Suggested workflow:
+# 👨‍💻 Author
 
-1. Fork the repository (or create a branch if you have push access).
-2. Create a feature branch: `git checkout -b feat/your-feature`.
-3. Make changes and include tests where appropriate.
-4. Open a pull request describing the change and why it's needed.
+**Winson Kpokpo**
 
-Please follow any repository guidelines (linting, formatting) if present.
+GitHub: [@winsonkpokpo-commits](https://github.com/winsonkpokpo-commits/GradeTrack)
 
-## License
+---
 
-No license file detected in the repository. If you want to make this project open-source, add a LICENSE file (e.g., MIT, Apache-2.0) and update this README accordingly.
+> **GradeTrack starts with a simple question: how can academic data be managed and understood more effectively?**
+>
+> The long-term goal is to explore how data analysis and machine learning can eventually transform that data into meaningful educational insights.
 
-## Contact
-
-Maintainer: winsonkpokpo-commits — https://github.com/winsonkpokpo-commits
-
-If you need help adapting data formats, adding features, or deploying to a hosting provider (Streamlit Cloud, Heroku, etc.), open an issue or a PR.
